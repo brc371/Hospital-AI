@@ -1,0 +1,159 @@
+@page "{id:guid}"
+@model Hospital_AI.Pages.Encounters.WorkspaceModel
+@{
+    ViewData["Title"] = "Encounter";
+}
+
+@if (Model.Encounter is null)
+{
+    <p>Encounter not found.</p>
+}
+else
+{
+    <h1 class="display-6">Encounter: @Model.Encounter.Patient?.FirstName @Model.Encounter.Patient?.LastName</h1>
+    <p class="text-muted">DOB: @Model.Encounter.Patient?.DateOfBirth &middot; Status: @Model.Encounter.Status</p>
+
+    @if (Model.IsReadOnly)
+    {
+        <div class="alert alert-info">You are viewing this encounter as an Admin. Only the owning provider can edit it.</div>
+    }
+
+    @if (Model.DraftSaved)
+    {
+        <div class="alert alert-success">Draft saved.</div>
+    }
+
+    @if (Model.NoteVersionSaved)
+    {
+        <div class="alert alert-success">Note saved as a new version. This encounter is now marked Saved.</div>
+    }
+
+    @if (Model.SaveNoteError is not null)
+    {
+        <div class="alert alert-warning">@Model.SaveNoteError</div>
+    }
+
+    <form method="post" asp-page-handler="SaveDraft" asp-route-id="@Model.Encounter.Id">
+        <div class="mb-3">
+            <label asp-for="TranscriptText" class="form-label">Transcript / clinical observations</label>
+            <textarea asp-for="TranscriptText" id="transcriptText" class="form-control" rows="8" disabled="@Model.IsReadOnly"></textarea>
+        </div>
+        <div class="mb-3">
+            <label asp-for="DraftNoteText" class="form-label">Draft SOAP note</label>
+            <textarea asp-for="DraftNoteText" id="draftNoteText" class="form-control" rows="10" disabled="@Model.IsReadOnly"></textarea>
+        </div>
+        @if (!Model.IsReadOnly)
+        {
+            <button type="submit" class="btn btn-primary">Save draft</button>
+            <button type="button" id="generateNoteBtn" class="btn btn-outline-primary">Generate note</button>
+            <button type="submit" formaction="?handler=SaveNote" class="btn btn-success">Save note (finalize version)</button>
+            <span id="generateStatus" class="text-muted ms-2"></span>
+        }
+    </form>
+
+    @if (!Model.IsReadOnly)
+    {
+        <div class="card mt-4">
+            <div class="card-body">
+                <h5 class="card-title">ICD-10 code search</h5>
+                <p class="text-muted small">Search by code or diagnosis (e.g. "diabetes", "chest pain", "J45"). Click a result to insert it into the Assessment section of the draft note.</p>
+                <input type="text" id="icd10SearchInput" class="form-control mb-2" placeholder="Search ICD-10 codes..." autocomplete="off" />
+                <ul id="icd10Results" class="list-group"></ul>
+            </div>
+        </div>
+    }
+
+    <p class="mt-3"><a asp-page="./Index">Back to encounter list</a></p>
+
+    @if (Model.NoteVersions.Count > 0)
+    {
+        <h5 class="mt-4">Saved note versions</h5>
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Version</th>
+                    <th>Saved by</th>
+                    <th>Saved at</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var version in Model.NoteVersions)
+                {
+                    <tr>
+                        <td>@version.VersionNumber</td>
+                        <td>@version.SavedByProvider?.Name</td>
+                        <td>@version.SavedAtUtc.ToLocalTime()</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (!Model.IsReadOnly)
+    {
+        <script>
+            document.getElementById('generateNoteBtn').addEventListener('click', function () {
+                const button = this;
+                const status = document.getElementById('generateStatus');
+                const draftTextarea = document.getElementById('draftNoteText');
+
+                button.disabled = true;
+                status.textContent = 'Generating...';
+                draftTextarea.value = '';
+
+                const encounterId = '@Model.Encounter.Id';
+                const eventSource = new EventSource(`/api/encounters/${encounterId}/generate-note`);
+
+                eventSource.onmessage = function (event) {
+                    draftTextarea.value += event.data.replace(/\\n/g, '\n');
+                };
+
+                eventSource.addEventListener('done', function () {
+                    eventSource.close();
+                    button.disabled = false;
+                    status.textContent = 'Generation complete. Review and save the draft.';
+                });
+
+                eventSource.onerror = function () {
+                    eventSource.close();
+                    button.disabled = false;
+                    status.textContent = 'Generation stopped (connection closed).';
+                };
+            });
+
+            // ICD-10 search widget: debounced free-text search against the local API, with
+            // results inserted into the draft note's Assessment section on click.
+            const icd10Input = document.getElementById('icd10SearchInput');
+            const icd10Results = document.getElementById('icd10Results');
+            let icd10DebounceTimer = null;
+
+            icd10Input.addEventListener('input', function () {
+                clearTimeout(icd10DebounceTimer);
+                const query = this.value.trim();
+
+                if (query.length === 0) {
+                    icd10Results.innerHTML = '';
+                    return;
+                }
+
+                icd10DebounceTimer = setTimeout(async () => {
+                    const response = await fetch(`/api/icd10codes/search?q=${encodeURIComponent(query)}`);
+                    const codes = await response.json();
+
+                    icd10Results.innerHTML = '';
+                    codes.forEach(item => {
+                        const li = document.createElement('li');
+                        li.className = 'list-group-item list-group-item-action';
+                        li.style.cursor = 'pointer';
+                        li.textContent = `${item.code} - ${item.description}`;
+                        li.addEventListener('click', () => {
+                            const draftTextarea = document.getElementById('draftNoteText');
+                            draftTextarea.value += (draftTextarea.value.endsWith('\n') || draftTextarea.value.length === 0 ? '' : '\n') + `${item.code} - ${item.description}`;
+                        });
+                        icd10Results.appendChild(li);
+                    });
+                }, 300);
+            });
+        </script>
+    }
+}

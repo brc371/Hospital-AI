@@ -1,0 +1,75 @@
+@page
+@model Hospital_AI.Pages.Encounters.IndexModel
+@{
+    ViewData["Title"] = "Encounter Workspace";
+}
+
+<h1 class="display-6">Encounter Workspace</h1>
+
+<div asp-validation-summary="All" class="text-danger"></div>
+
+@if (!Model.IsAdmin)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Start a new encounter</h5>
+            <form method="post" asp-page-handler="StartEncounter" class="row g-3">
+                <div class="col-md-4">
+                    <label asp-for="FirstName" class="form-label">First name</label>
+                    <input asp-for="FirstName" class="form-control" />
+                </div>
+                <div class="col-md-4">
+                    <label asp-for="LastName" class="form-label">Last name</label>
+                    <input asp-for="LastName" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="DateOfBirth" class="form-label">Date of birth</label>
+                    <input asp-for="DateOfBirth" type="date" class="form-control" />
+                </div>
+                <div class="col-md-1 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">Start</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+<h5>@(Model.IsAdmin ? "All encounters" : "Your encounters")</h5>
+@if (Model.Encounters.Count == 0)
+{
+    <p class="text-muted">@(Model.IsAdmin ? "No encounters have been created yet." : "You have no encounters yet. Start one above.")</p>
+}
+else
+{
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>Patient</th>
+                <th>Date of birth</th>
+                @if (Model.IsAdmin)
+                {
+                    <th>Provider</th>
+                }
+                <th>Status</th>
+                <th>Last updated</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var encounter in Model.Encounters)
+            {
+                <tr>
+                    <td>@encounter.Patient?.FirstName @encounter.Patient?.LastName</td>
+                    <td>@encounter.Patient?.DateOfBirth</td>
+                    @if (Model.IsAdmin)
+                    {
+                        <td>@encounter.Provider?.Name</td>
+                    }
+                    <td>@encounter.Status</td>
+                    <td>@encounter.UpdatedAtUtc.ToLocalTime()</td>
+                    <td><a asp-page="./Workspace" asp-route-id="@encounter.Id">Open</a></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}

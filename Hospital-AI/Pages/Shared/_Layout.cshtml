@@ -14,7 +14,14 @@
                 <div class="d-flex ms-auto align-items-center">
                     @if (User.Identity?.IsAuthenticated == true)
                     {
-                        <span class="me-3">@User.Identity.Name</span>
+                        var currentProvider = Context.Items["CurrentProvider"] as Hospital_AI.Models.Provider;
+                        <span class="me-3">
+                            @User.Identity.Name
+                            @if (currentProvider is not null)
+                            {
+                                <text> (@currentProvider.Name)</text>
+                            }
+                        </span>
                         <a class="btn btn-outline-secondary btn-sm" asp-area="MicrosoftIdentity" asp-controller="Account" asp-action="SignOut">Sign out</a>
                     }
                     else

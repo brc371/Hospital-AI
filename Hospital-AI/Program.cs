@@ -2,6 +2,7 @@ using Azure;
 using Azure.AI.Inference;
 using Azure.AI.OpenAI;
 using Hospital_AI.Data;
+using Hospital_AI.Services;
 using Hospital_AI.Settings;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Data.SqlClient;
@@ -146,6 +147,23 @@ namespace Hospital_AI
 
             builder.Services.AddDbContext<ClinicalScribeDbContext>(options => options.UseSqlServer(connectionString));
 
+            // Register the role-resolution service used to match a signed-in Entra External ID
+            // user's email to their Provider record (and thus their role). Scoped lifetime
+            // matches the DbContext it depends on.
+            builder.Services.AddScoped<IRoleResolutionService, RoleResolutionService>();
+
+            // Register the patient-matching and encounter services used by the provider
+            // encounter workspace.
+            builder.Services.AddScoped<IPatientMatchingService, PatientMatchingService>();
+            builder.Services.AddScoped<IEncounterService, EncounterService>();
+
+            // Register the note-generation service (streams AI-generated SOAP notes, with
+            // tool-calling for patient history context).
+            builder.Services.AddScoped<INoteGenerationService, NoteGenerationService>();
+
+            // Register the ICD-10 search service used by the code search widget.
+            builder.Services.AddScoped<IIcd10SearchService, Icd10SearchService>();
+
             // This is the command to build the app
             // builder.<> methods. From this point on you work with "app" to configure stuff.
             var app = builder.Build();
@@ -154,6 +172,17 @@ namespace Hospital_AI
             if (app.Environment.IsDevelopment())
             {
 
+            }
+
+            // Apply pending EF Core migrations and seed demo Provider/Admin accounts at
+            // startup. Seeding is idempotent (no-op if Providers table already has rows), so
+            // this is safe to run every time the app starts, in both dev and Azure.
+            using (var scope = app.Services.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<ClinicalScribeDbContext>();
+                await dbContext.Database.MigrateAsync();
+                await DbSeeder.SeedAsync(dbContext);
+                await DbSeeder.SeedIcd10CodesAsync(dbContext);
             }
 
 
@@ -193,6 +222,40 @@ namespace Hospital_AI
             // UseAuthorization() so the ClaimsPrincipal is populated (from the auth cookie)
             // before authorization checks evaluate [Authorize]/fallback policies.
             app.UseAuthentication();
+
+            // After authentication, resolve the signed-in user's email to a Provider record and
+            // stash it in HttpContext.Items so pages (e.g. _Layout) can display the provider's
+            // display name without an extra DB lookup. If the user is authenticated but has no
+            // matching active Provider (unknown or deactivated account), redirect them to
+            // /AccessDenied instead of letting them reach the app. Public/anonymous pages
+            // (Index, sign-in/out, AccessDenied itself) are exempt from the redirect so users
+            // always have a way to see this message and sign out.
+            app.Use(async (context, next) =>
+            {
+                var path = context.Request.Path;
+                var isPublicPath = path.StartsWithSegments("/AccessDenied")
+                    || path.StartsWithSegments("/MicrosoftIdentity")
+                    || path.StartsWithSegments("/signin-oidc")
+                    || path.StartsWithSegments("/signout-callback-oidc")
+                    || path == "/" || path == "";
+
+                if (context.User.Identity?.IsAuthenticated == true)
+                {
+                    var email = context.User.Identity.Name;
+                    var roleResolutionService = context.RequestServices.GetRequiredService<IRoleResolutionService>();
+                    var provider = email is null ? null : await roleResolutionService.ResolveByEmailAsync(email);
+
+                    if (provider is null && !isPublicPath)
+                    {
+                        context.Response.Redirect("/AccessDenied");
+                        return;
+                    }
+
+                    context.Items["CurrentProvider"] = provider;
+                }
+
+                await next();
+            });
 
             // Adds authorization middleware to the request pipeline.
             // Keep app.UseAuthorization() before app.MapControllers() so authorization runs before
@@ -237,9 +300,14 @@ namespace Hospital_AI
             builder.Services.AddSingleton<IChatClient>(services =>
             {
                 var azureOpenAiClient = new AzureOpenAIClient(openAIServiceEndpointUri, apiKeyCredential);
-                //return azureOpenAiClient.GetChatClient(deploymentName);
-                var chatClient = azureOpenAiClient.GetChatClient(deploymentName);
-                return chatClient.AsIChatClient();
+                var chatClient = azureOpenAiClient.GetChatClient(deploymentName).AsIChatClient();
+
+                // Wrap with function-invocation middleware so tool calls (e.g. the patient
+                // history lookup used by NoteGenerationService) are automatically executed and
+                // fed back to the model, rather than just returned as unexecuted tool-call requests.
+                return new ChatClientBuilder(chatClient)
+                    .UseFunctionInvocation()
+                    .Build();
             });
         }
     }

@@ -1,0 +1,19 @@
+@page
+@model Hospital_AI.Pages.AccessDeniedModel
+@{
+    ViewData["Title"] = "Access Denied";
+}
+
+<div class="text-center">
+    <h1 class="display-6">Access Denied</h1>
+    @if (!string.IsNullOrEmpty(Model.SignedInEmail))
+    {
+        <p>The account <strong>@Model.SignedInEmail</strong> is not recognized as an active provider or admin in this system.</p>
+    }
+    else
+    {
+        <p>This account is not recognized as an active provider or admin in this system.</p>
+    }
+    <p>If you believe this is an error, contact your system administrator to be added as a provider.</p>
+    <a class="btn btn-outline-secondary" asp-area="MicrosoftIdentity" asp-controller="Account" asp-action="SignOut">Sign out</a>
+</div>

@@ -1,3 +1,150 @@
+## STEP 9 COMPLETE: ICD-10 code search widget
+
+- `Data/Icd10CodeSeedData.cs` - ~220 real, curated ICD-10-CM codes spanning major categories
+  (cardiovascular, endocrine, respiratory, musculoskeletal, mental health, infectious disease,
+  injuries, preventive/screening codes, etc.) as a static `(Code, Description)` list embedded
+  directly in the app - no external ICD-10 API is called at runtime.
+- `Data/DbSeeder.cs` - new `SeedIcd10CodesAsync(context)`, idempotent (no-op if `Icd10Codes`
+  already has rows), called from `Program.cs` startup alongside the existing provider seeding.
+- `Services/IIcd10SearchService.cs` / `Icd10SearchService.cs` - "semantic search" here means
+  explainable, in-memory relevance-ranked text search (not true vector/embedding search, since
+  no embeddings deployment exists in `AISettings` and it would need a new Azure resource):
+  loads the full ~220-row table (small enough to rank in C#), scores each code against the
+  query (exact code match > code prefix match > description substring match > all query words
+  present > partial word match), and returns the top N ordered by score. Deliberately simple
+  and interview-explainable rather than clever.
+- `Controllers/Icd10CodesController.cs` (`GET /api/icd10codes/search?q=...`) - thin wrapper
+  around `IIcd10SearchService.SearchAsync`, returns `{ code, description }` JSON results.
+- `Pages/Encounters/Workspace.cshtml` - new "ICD-10 code search" card (hidden when
+  `IsReadOnly`): a debounced (300ms) free-text input that calls the search API and renders
+  clickable results; clicking a result appends `"{code} - {description}"` as a new line into
+  the `DraftNoteText` textarea, so a provider can quickly attach relevant diagnosis codes to
+  the Assessment section before saving a note version.
+
+## STEP 8 COMPLETE: Note versioning/audit trail persistence
+
+- `Services/SoapNoteParser.cs` - static helper that splits the flat `DraftNoteText` string into
+  Subjective/Objective/Assessment/Plan sections by matching `"SectionName:"` header lines via
+  regex. Falls back to putting all text into `Subjective` if no headers are recognized, so
+  content is never silently dropped even if the AI or a provider free-types without headers.
+- `Services/IEncounterService.cs` / `EncounterService.cs`:
+  - `SaveNoteVersionAsync(encounterId, providerId)` - parses the encounter's current
+	`DraftNoteText`, creates a new immutable `NoteVersion` row with an auto-incremented
+	`VersionNumber` (per encounter), writes an `AuditLog` entry ("Created" / `NoteVersion`),
+	and marks the encounter `Status = Saved`. Returns `null` if the encounter isn't owned by
+	the given provider or has no draft note text to finalize (nothing to save).
+  - `GetNoteVersionsAsync(encounterId)` - lists all saved versions for an encounter (with the
+	saving provider's name included), most recent first.
+- `Pages/Encounters/Workspace.cshtml(.cs)`:
+  - New "Save note (finalize version)" button (`OnPostSaveNoteAsync`) - first persists the
+	current transcript/draft via the existing `SaveDraftAsync` (so nothing typed since the last
+	manual "Save draft" click is lost), then calls `SaveNoteVersionAsync`.
+  - Shows a warning alert if there's no draft text to finalize, or a success alert once a
+	version is saved.
+  - New "Saved note versions" table shows version number, saving provider, and saved-at
+	timestamp for the encounter - the audit trail is now visibly surfaced to providers/admins,
+	not just recorded silently in the database.
+- NOTE: "Save draft" (existing, unversioned) and "Save note" (new, versioned) are intentionally
+  both present: draft saves are cheap/frequent (typing/generation-in-progress persistence),
+  while a note version is a deliberate, audited, immutable finalization action.
+
+## STEP 7 COMPLETE: SOAP note streaming generation (SSE) with tool-calling
+
+- `Program.cs` - the `IChatClient` singleton is now wrapped with
+  `.UseFunctionInvocation()` (via `ChatClientBuilder`) so tool calls the model makes are
+  automatically executed and fed back into the conversation, not just returned unexecuted.
+- `Services/INoteGenerationService.cs` / `NoteGenerationService.cs`:
+  - `GenerateNoteStreamAsync(encounterId, cancellationToken)` loads the encounter + patient,
+	builds a system prompt instructing SOAP-note generation, and streams
+	`_chatClient.GetStreamingResponseAsync(...)` results as an `IAsyncEnumerable<string>`.
+  - Exposes a `get_patient_history` tool (via `AIFunctionFactory.Create`) bound by closure to
+	the current patient's ID, so the model can look up up to 5 prior saved `NoteVersion` rows
+	(Subjective/Objective/Assessment/Plan) for the same patient across *other* encounters, for
+	context on returning patients - without always sending full history up front.
+- `Controllers/NoteGenerationController.cs` (`GET /api/encounters/{encounterId}/generate-note`)
+  - Streams the generated text as Server-Sent Events (`text/event-stream`). Only the encounter's
+	owning provider may generate (uses `GetEncounterAsync(id, providerId, isAdmin: false)` -
+	Admins can view drafts but do not generate on a provider's behalf).
+  - Newlines in each streamed chunk are encoded as `\n` literal text (SSE `data:` lines cannot
+	contain raw line breaks) and decoded client-side.
+  - Sends a final `event: done` so the client knows to stop listening and re-enable the button.
+- `Pages/Encounters/Workspace.cshtml` - added a "Generate note" button (hidden when
+  `IsReadOnly`) that opens a browser `EventSource` against the SSE endpoint and appends each
+  streamed chunk into the `DraftNoteText` textarea live, decoding `\n` back to real line breaks.
+  The auth cookie is sent automatically since `EventSource` requests are same-origin.
+- NOTE: generation only fills the `DraftNoteText` textarea in the browser - the provider must
+  still click **Save draft** to persist it (existing Step 6 behavior). Saving a note as a
+  finalized, versioned `NoteVersion` (with Subjective/Objective/Assessment/Plan split into
+  separate fields and an audit trail) is Step 8, not yet implemented.
+
+## STEP 6 COMPLETE: Provider encounter workspace backend
+
+- FIX (post-completion): the `/Encounters` index page originally always called
+  `GetEncountersForProviderAsync`, so Admins (who own no encounters themselves) saw an empty
+  list instead of every provider's encounters. Added `IEncounterService.GetAllEncountersAsync()`
+  (includes `Patient` + `Provider`), and `Index.cshtml(.cs)` now branches on
+  `provider.Role == ProviderRole.Admin`: Admins see all encounters with a "Provider" column and
+  no "start new encounter" form (Admins don't own encounters); Providers see only their own with
+  the start-encounter form. `Workspace.cshtml(.cs)` already correctly handled the
+  read-only/admin-viewing-another-provider case via `GetEncounterAsync(id, providerId, isAdmin)`.
+- `Services/IPatientMatchingService.cs` / `PatientMatchingService.cs` - finds an existing
+  `Patient` by case-insensitive first name + last name + date of birth, or creates a new one.
+  This is how the app detects returning patients across encounters without a formal MRN.
+- `Services/IEncounterService.cs` / `EncounterService.cs`:
+  - `StartEncounterAsync` - matches/creates the patient, then creates a new `Encounter` row
+	(status `Draft`, empty transcript) owned by the given provider.
+  - `SaveDraftAsync` - updates `TranscriptText` / `DraftNoteText` / `UpdatedAtUtc` for an
+	encounter, scoped to the owning provider (returns `null` if the encounter doesn't exist or
+	belongs to a different provider - enforces "providers only see their own data").
+  - `GetEncounterAsync` - fetches a single encounter with its `Patient` included; Admins can
+	view any provider's encounter (read-only in the UI), non-admins only their own.
+  - `GetEncountersForProviderAsync` - lists a provider's own encounters, most recently
+	updated first.
+- Both services registered as scoped in `Program.cs` (match the scoped `DbContext`).
+- `Pages/Encounters/Index.cshtml(.cs)` - the workspace landing page: a "start new encounter"
+  form (first name, last name, DOB) and a table of the signed-in provider's own encounters.
+  Resolves the current provider via `IRoleResolutionService` on every request (not persisted in
+  claims) since role resolution is cheap and always reflects the latest Provider row.
+- `Pages/Encounters/Workspace.cshtml(.cs)` (route `/Encounters/Workspace/{id:guid}`) - lets the
+  owning provider edit the transcript and in-progress draft note text and save continuously
+  (`OnPostSaveDraftAsync`). If an Admin opens another provider's encounter, the page renders
+  read-only (`IsReadOnly`) with the save button hidden - satisfies "Admin can view all
+  encounters" without letting them edit a provider's draft.
+- NOTE: SOAP note *generation* (AI streaming) and finalized `NoteVersion` saving are NOT yet
+  implemented - `DraftNoteText` today is just a plain textarea a provider can type into
+  manually. That's Step 7 (SSE streaming generation) and Step 8 (note versioning/audit trail).
+
+## STEP 5 COMPLETE: Demo accounts + role resolution service
+
+- `Data/DbSeeder.cs` - seeds 1 Admin + 3 Provider demo accounts into the `Providers` table on
+  startup. Idempotent (no-op if any Providers already exist). Real test accounts created in
+  Entra External ID and matched here by email:
+  | Display Name | Email | Role |
+  |---|---|---|
+  | Admin | bcalderon_e94@outlook.com | Admin |
+  | Provider1 (John Doe) | hospitalprovider1.gizmo280@passinbox.com | Provider |
+  | Provider2 (Jane Doe) | hospitalprovider2.swimming970@passinbox.com | Provider |
+  | Provider3 (Jack Doe) | brian.r.calderon@proton.me | Provider |
+- `Program.cs` now calls `Database.MigrateAsync()` + `DbSeeder.SeedAsync()` right after
+  `app.Build()`, before `app.Run()`.
+- `Services/IRoleResolutionService.cs` / `RoleResolutionService.cs` - resolves the signed-in
+  user's email (case-insensitive) to their `Provider` record. Deactivated providers resolve to
+  `null` (same as unknown users), preserving their historical data but blocking access.
+- New middleware in `Program.cs` (after `UseAuthentication()`, before `UseAuthorization()`):
+  for any authenticated request, resolves the user's Provider record, stores it on
+  `HttpContext.Items["CurrentProvider"]` for use by pages/layout, and redirects to
+  `/AccessDenied` if no matching active Provider is found (except on public paths).
+- `Pages/AccessDenied.cshtml` / `.cshtml.cs` - shown to unknown/deactivated users; displays
+  their email and offers a sign-out link (public/anonymous page so it's always reachable).
+- `Pages/Shared/_Layout.cshtml` - top-right header now shows `email (DisplayName)` using the
+  `CurrentProvider` stashed in `HttpContext.Items`, falling back to just the email if no
+  Provider record was resolved (shouldn't happen for authenticated users past the
+  AccessDenied check, but keeps the layout defensive).
+- NOTE: since `DbSeeder` only seeds once (skips if `Providers` table has any rows), if the
+  DB was already seeded with old placeholder emails before these real accounts were created,
+  either clear the `Providers` table manually or delete the initial migration's applied state
+  before restarting, so the real emails get seeded.
+
 ## Homework Assignment Title: Note Keeper App
 ## Homework Assignment Number: 4
 ## Name: Brian Calderon
