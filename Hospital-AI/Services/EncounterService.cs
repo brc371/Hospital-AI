@@ -163,5 +163,22 @@ namespace Hospital_AI.Services
                 .OrderByDescending(v => v.VersionNumber)
                 .ToListAsync();
         }
+
+        /// <inheritdoc />
+        public async Task<NoteVersion?> GetNoteVersionAsync(Guid versionId, Guid providerId, bool isAdmin)
+        {
+            var query = _dbContext.NoteVersions
+                .Include(v => v.SavedByProvider)
+                .Include(v => v.Encounter!)
+                    .ThenInclude(e => e.Patient)
+                .Where(v => v.Id == versionId);
+
+            if (!isAdmin)
+            {
+                query = query.Where(v => v.Encounter != null && v.Encounter.ProviderId == providerId);
+            }
+
+            return await query.FirstOrDefaultAsync();
+        }
     }
 }

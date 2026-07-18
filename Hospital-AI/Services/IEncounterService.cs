@@ -71,5 +71,16 @@ namespace Hospital_AI.Services
         /// </summary>
         /// <param name="encounterId">The encounter whose note versions to list.</param>
         Task<List<NoteVersion>> GetNoteVersionsAsync(Guid encounterId);
+
+        /// <summary>
+        /// Retrieves a single saved note version by ID, including its parent encounter (with
+        /// patient) and the provider who saved it, for read-only viewing. Returns <c>null</c>
+        /// if not found, or if the version's encounter belongs to a different provider than
+        /// <paramref name="providerId"/> (unless <paramref name="isAdmin"/> is <c>true</c>).
+        /// </summary>
+        /// <param name="versionId">The note version to retrieve.</param>
+        /// <param name="providerId">The requesting provider's ID.</param>
+        /// <param name="isAdmin">Whether the requesting user is an Admin (can view any provider's note versions).</param>
+        Task<NoteVersion?> GetNoteVersionAsync(Guid versionId, Guid providerId, bool isAdmin);
     }
 }

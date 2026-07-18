@@ -39,6 +39,12 @@ namespace Hospital_AI.Pages.Admin
         /// <summary>Set if adding a new account failed (e.g. duplicate email).</summary>
         public string? AddError { get; private set; }
 
+        /// <summary>Set if a deactivation attempt was blocked (e.g. an admin trying to deactivate their own account).</summary>
+        public string? ToggleError { get; private set; }
+
+        /// <summary>The ID of the currently signed-in admin, used to disable/guard self-deactivation in the UI.</summary>
+        public Guid CurrentAdminId { get; private set; }
+
         /// <summary>Handles GET requests: loads the current provider roster.</summary>
         public async Task<IActionResult> OnGetAsync()
         {
@@ -48,6 +54,7 @@ namespace Hospital_AI.Pages.Admin
                 return RedirectToPage("/AccessDenied");
             }
 
+            CurrentAdminId = provider.Id;
             Providers = await _providerManagementService.GetAllAsync();
             return Page();
         }
@@ -82,12 +89,27 @@ namespace Hospital_AI.Pages.Admin
         }
 
         /// <summary>Handles the "toggle active" action for a given provider row.</summary>
+        /// <summary>
+        /// Handles the "toggle active" action for a given provider row. An admin may not
+        /// deactivate their own account - doing so would immediately lock them out (an
+        /// inactive account is treated as unrecognized by <see cref="IRoleResolutionService"/>)
+        /// with no way back in short of a direct database edit.
+        /// </summary>
         public async Task<IActionResult> OnPostToggleActiveAsync(Guid id, bool isActive)
         {
             var provider = await ResolveCurrentAdminAsync();
             if (provider is null)
             {
                 return RedirectToPage("/AccessDenied");
+            }
+
+            CurrentAdminId = provider.Id;
+
+            if (!isActive && id == provider.Id)
+            {
+                ToggleError = "You cannot deactivate your own account.";
+                Providers = await _providerManagementService.GetAllAsync();
+                return Page();
             }
 
             await _providerManagementService.SetActiveAsync(id, isActive);

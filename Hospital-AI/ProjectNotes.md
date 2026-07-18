@@ -1,3 +1,34 @@
+## POST-STEP-13 FIX: Self-deactivation guard + clickable note version history
+
+Two gaps surfaced by manual testing on the live Azure deployment, both cross-checked against
+`Challenge Description.md` before implementing:
+
+**1. Admin could deactivate their own account.** Since `RoleResolutionService` treats a
+deactivated provider as unrecognized (redirects to `/AccessDenied`), an admin deactivating
+themselves would be an immediate, unrecoverable self-lockout (short of a direct DB edit). The
+spec doesn't call this out explicitly, but it's an obvious defensive fix:
+- `Pages/Admin/Providers.cshtml.cs` - added `CurrentAdminId` and `ToggleError` properties.
+  `OnPostToggleActiveAsync` now blocks the request when `!isActive && id == provider.Id`,
+  setting `ToggleError` instead of calling `SetActiveAsync`.
+- `Pages/Admin/Providers.cshtml` - shows a `ToggleError` alert banner; the admin's own active
+  row now shows a "This is you" label instead of a "Deactivate" button.
+
+**2. Saved note version history wasn't openable.** The spec explicitly requires: "Providers
+can view the full version history of any note, including who saved each version and at what
+time." The `Workspace.cshtml` table already showed version number/saved-by/saved-at, but rows
+weren't clickable - a provider had no way to actually open and read an old version's content.
+- `Services/IEncounterService.cs` / `EncounterService.cs` - added
+  `GetNoteVersionAsync(Guid versionId, Guid providerId, bool isAdmin)`, which loads a single
+  `NoteVersion` (with `SavedByProvider` and `Encounter.Patient`), scoped to the owning provider
+  unless the caller is an Admin.
+- `Pages/Encounters/ViewVersion.cshtml.cs` / `.cshtml` (new) - a read-only page showing the
+  saved Subjective/Objective/Assessment/Plan text plus who saved it and when, with a clear
+  "read-only, versions are immutable" notice and a link back to the encounter workspace.
+- `Pages/Encounters/Workspace.cshtml` - each row in the "Saved note versions" table now has a
+  "View" link to `./ViewVersion?id={version.Id}`.
+
+No schema/migration changes were needed for either fix. Build verified successful.
+
 ## STEP 12 COMPLETE: Non-happy-path scenarios (2 of 2)
 
 Two substantive non-happy-path scenarios are implemented and demonstrable:

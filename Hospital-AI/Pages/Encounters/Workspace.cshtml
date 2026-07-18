@@ -11,7 +11,7 @@
 else
 {
     <h1 class="display-6">Encounter: @Model.Encounter.Patient?.FirstName @Model.Encounter.Patient?.LastName</h1>
-    <p class="text-muted">DOB: @Model.Encounter.Patient?.DateOfBirth &middot; Status: @Model.Encounter.Status</p>
+    <p class="text-muted">DOB: @Model.Encounter.Patient?.DateOfBirth &middot; <span id="autosaveStatus">Status: @Model.Encounter.Status</span></p>
 
     <div id="deactivatedBanner" class="alert alert-danger" style="display:none;">
         Your account has been deactivated by an administrator. Your work up to the last
@@ -54,7 +54,6 @@ else
             <button type="button" id="generateNoteBtn" class="btn btn-outline-primary">Generate note</button>
             <button type="submit" formaction="?handler=SaveNote" class="btn btn-success">Save note (finalize version)</button>
             <span id="generateStatus" class="text-muted ms-2"></span>
-            <span id="autosaveStatus" class="text-muted ms-2"></span>
         }
     </form>
 
@@ -81,6 +80,7 @@ else
                     <th>Version</th>
                     <th>Saved by</th>
                     <th>Saved at</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
@@ -90,6 +90,7 @@ else
                         <td>@version.VersionNumber</td>
                         <td>@version.SavedByProvider?.Name</td>
                         <td>@version.SavedAtUtc.ToLocalTime()</td>
+                        <td><a asp-page="./ViewVersion" asp-route-id="@version.Id">View</a></td>
                     </tr>
                 }
             </tbody>
@@ -176,7 +177,7 @@ else
 
             function scheduleAutosave() {
                 autosaveDirty = true;
-                autosaveStatus.textContent = 'Unsaved changes...';
+                autosaveStatus.textContent = 'Status: Unsaved changes...';
                 clearTimeout(autosaveDebounceTimer);
                 autosaveDebounceTimer = setTimeout(runAutosave, 1500);
             }
@@ -191,13 +192,13 @@ else
 
                 try {
                     await saveDraftToServer();
-                    autosaveStatus.textContent = 'All changes saved.';
+                    autosaveStatus.textContent = 'Status: Saved';
                 } catch (error) {
                     if (error instanceof DeactivatedAccountError) {
                         handleAccountDeactivated();
                         return;
                     }
-                    autosaveStatus.textContent = 'Autosave failed - click "Save draft" manually.';
+                    autosaveStatus.textContent = 'Status: Autosave failed - click "Save draft" manually.';
                 } finally {
                     autosaveInFlight = false;
                     if (autosaveDirty && !accountDeactivated) {
@@ -238,7 +239,7 @@ else
                 try {
                     await saveDraftToServer();
                     autosaveDirty = false;
-                    autosaveStatus.textContent = 'All changes saved.';
+                    autosaveStatus.textContent = 'Status: Saved';
                 } catch (error) {
                     if (error instanceof DeactivatedAccountError) {
                         handleAccountDeactivated();

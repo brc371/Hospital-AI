@@ -17,6 +17,11 @@
     <div class="alert alert-warning">@Model.AddError</div>
 }
 
+@if (Model.ToggleError is not null)
+{
+    <div class="alert alert-warning">@Model.ToggleError</div>
+}
+
 <table class="table table-sm">
     <thead>
         <tr>
@@ -36,11 +41,18 @@
                 <td>@provider.Role</td>
                 <td>@(provider.IsActive ? "Active" : "Deactivated")</td>
                 <td>
-                    <form method="post" asp-page-handler="ToggleActive" asp-route-id="@provider.Id" asp-route-isActive="@(!provider.IsActive)" class="d-inline">
-                        <button type="submit" class="btn btn-sm @(provider.IsActive ? "btn-outline-danger" : "btn-outline-success")">
-                            @(provider.IsActive ? "Deactivate" : "Reactivate")
-                        </button>
-                    </form>
+                    @if (provider.IsActive && provider.Id == Model.CurrentAdminId)
+                    {
+                        <span class="text-muted small">This is you</span>
+                    }
+                    else
+                    {
+                        <form method="post" asp-page-handler="ToggleActive" asp-route-id="@provider.Id" asp-route-isActive="@(!provider.IsActive)" class="d-inline">
+                            <button type="submit" class="btn btn-sm @(provider.IsActive ? "btn-outline-danger" : "btn-outline-success")">
+                                @(provider.IsActive ? "Deactivate" : "Reactivate")
+                            </button>
+                        </form>
+                    }
                 </td>
             </tr>
         }
