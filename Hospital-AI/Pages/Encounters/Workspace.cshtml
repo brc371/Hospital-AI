@@ -74,9 +74,17 @@ else
     @if (Model.NoteVersions.Count > 0)
     {
         <h5 class="mt-4">Saved note versions</h5>
+        @if (Model.NoteVersions.Count > 1)
+        {
+            <p class="text-muted small">Select exactly two versions below to compare them.</p>
+        }
         <table class="table table-sm">
             <thead>
                 <tr>
+                    @if (Model.NoteVersions.Count > 1)
+                    {
+                        <th></th>
+                    }
                     <th>Version</th>
                     <th>Saved by</th>
                     <th>Saved at</th>
@@ -87,6 +95,10 @@ else
                 @foreach (var version in Model.NoteVersions)
                 {
                     <tr>
+                        @if (Model.NoteVersions.Count > 1)
+                        {
+                            <td><input type="checkbox" class="compare-version-checkbox" value="@version.Id" /></td>
+                        }
                         <td>@version.VersionNumber</td>
                         <td>@version.SavedByProvider?.Name</td>
                         <td>@version.SavedAtUtc.ToLocalTime()</td>
@@ -95,6 +107,32 @@ else
                 }
             </tbody>
         </table>
+        @if (Model.NoteVersions.Count > 1)
+        {
+            <button type="button" id="compareVersionsBtn" class="btn btn-outline-secondary btn-sm" disabled>Compare selected versions</button>
+
+            <script>
+                (function () {
+                    const checkboxes = Array.from(document.querySelectorAll('.compare-version-checkbox'));
+                    const compareBtn = document.getElementById('compareVersionsBtn');
+
+                    function updateCompareButtonState() {
+                        const checkedCount = checkboxes.filter(cb => cb.checked).length;
+                        compareBtn.disabled = checkedCount !== 2;
+                    }
+
+                    checkboxes.forEach(cb => cb.addEventListener('change', updateCompareButtonState));
+
+                    compareBtn.addEventListener('click', function () {
+                        const selected = checkboxes.filter(cb => cb.checked).map(cb => cb.value);
+                        if (selected.length !== 2) {
+                            return;
+                        }
+                        window.location.href = '/Encounters/CompareVersions?fromId=' + encodeURIComponent(selected[0]) + '&toId=' + encodeURIComponent(selected[1]);
+                    });
+                })();
+            </script>
+        }
     }
 
     @if (!Model.IsReadOnly)

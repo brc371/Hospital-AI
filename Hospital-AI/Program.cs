@@ -169,6 +169,10 @@ namespace Hospital_AI
             builder.Services.AddScoped<ITemplateService, TemplateService>();
             builder.Services.AddScoped<IProviderManagementService, ProviderManagementService>();
 
+            // Register the note version diff service (pioneer feature: side-by-side diff
+            // view between two saved note versions).
+            builder.Services.AddScoped<INoteVersionDiffService, NoteVersionDiffService>();
+
             // This is the command to build the app
             // builder.<> methods. From this point on you work with "app" to configure stuff.
             var app = builder.Build();

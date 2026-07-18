@@ -1,3 +1,31 @@
+## PIONEER FEATURE: Note version diff view
+
+Implements the "diff view between note versions" pioneer feature suggested in the Challenge
+Description, letting a provider see exactly what changed between two saved versions instead of
+having to compare two full notes manually.
+
+- `Services/NoteVersionDiffService.cs` (`INoteVersionDiffService`) - computes a classic
+  line-based diff between two blocks of text using a longest-common-subsequence (LCS) dynamic
+  programming table, so unchanged lines are matched correctly even when lines were inserted or
+  removed elsewhere (not just a naive position-by-position comparison). Returns a
+  `List<DiffLine>`, each tagged `Added`, `Removed`, or `Unchanged`. Registered as scoped in
+  `Program.cs` (no external dependencies/dependencies on the `DbContext`, so it's a small,
+  pure/testable service, deliberately kept simple and interview-explainable).
+- `Pages/Encounters/CompareVersions.cshtml(.cs)` (new, route `/Encounters/CompareVersions`) -
+  takes two note version IDs (`fromId`/`toId` query params), loads both via the existing
+  `IEncounterService.GetNoteVersionAsync` (same owning-provider-or-admin access check used by
+  `ViewVersion`), always orders them chronologically (older -> newer) regardless of which order
+  the IDs were passed in, and computes a separate diff for each of the four SOAP sections
+  (Subjective/Objective/Assessment/Plan). The view renders each section's lines with
+  added/removed lines highlighted (green/red background, strikethrough for removed) and
+  unchanged lines shown plainly.
+- `Pages/Encounters/Workspace.cshtml` - the "Saved note versions" table now shows a checkbox per
+  row (only when there are 2+ versions to compare) and a "Compare selected versions" button that
+  stays disabled until exactly two checkboxes are checked; clicking it navigates to
+  `/Encounters/CompareVersions?fromId={id}&toId={id}`.
+- No schema/migration changes were needed - this is a pure read/derived-data feature built
+  entirely on top of the existing immutable `NoteVersion` records.
+
 ## POST-STEP-13 FIX: Self-deactivation guard + clickable note version history
 
 Two gaps surfaced by manual testing on the live Azure deployment, both cross-checked against
