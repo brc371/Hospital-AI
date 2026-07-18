@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/bicep/">
+    <File Path="bicep/main.bicep" />
+    <File Path="bicep/main.bicepparam" />
+  </Folder>
+  <Folder Name="/bicep/modules/">
+    <File Path="bicep/modules/move-storage-and-appservice.bicep" />
+    <File Path="bicep/modules/storage-and-appservice.bicep" />
+    <File Path="bicep/modules/upgrade-appservice-plan.bicep" />
+  </Folder>
+  <Project Path="Hospital-AI/Hospital-AI.csproj" />
+  <Project Path="Hospital-AIChat/Hospital-AIChat.csproj" />
+</Solution>

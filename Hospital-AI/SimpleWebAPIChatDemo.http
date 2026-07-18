@@ -1,0 +1,10 @@
+@SimpleWebAPIChatDemo_HostAddress = https://localhost:7197
+
+
+
+POST {{SimpleWebAPIChatDemo_HostAddress}}/chat
+Content-Type: application/json
+
+"How do i make apple pie"
+
+###
