@@ -1,0 +1,20 @@
+@page
+@model Hospital_AI.Pages.IndexModel
+@{
+    ViewData["Title"] = "Welcome";
+}
+
+<div class="text-center">
+    @if (User.Identity?.IsAuthenticated == true)
+    {
+        <h1 class="display-6">Hospital AI Clinical Scribe</h1>
+        <p>Welcome back, @User.Identity.Name.</p>
+        <p><a href="/Encounters">Go to your encounter workspace</a></p>
+    }
+    else
+    {
+        <h1 class="display-6">Welcome to the Hospital AI Clinical Scribe application</h1>
+        <p>This application allows clinical providers to document patient encounters and generate structured SOAP notes with AI assistance. Please sign in to continue.</p>
+        <a class="btn btn-primary" asp-area="MicrosoftIdentity" asp-controller="Account" asp-action="SignIn">Login</a>
+    }
+</div>

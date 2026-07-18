@@ -42,8 +42,11 @@ subscription "Azure subscription 1", resource group `rg-hospital-app-prod`.
 - Build verified successful after all appsettings changes.
 
 ### Still TODO
-1. Run EF Core migrations (or equivalent schema setup) against the new empty
-   `sqldb-hospital-app` database - it currently has NO schema/data yet.
+1. ~~Run EF Core migrations against the new empty `sqldb-hospital-app` database~~ - DEFERRED.
+   No `Migrations` folder exists in the project yet (none were ever created), and the DB is
+   just a staging placeholder with no schema/data to preserve. Will create the initial
+   migration once the EF models/schema are finalized (`dotnet ef migrations add InitialCreate`,
+   then `dotnet ef database update` or apply via Program.cs `Database.Migrate()`).
 2. Publish `Hospital-AI` project to `app-hospital-prod` App Service from Visual Studio
    (Publish profile -> Azure App Service Linux -> rg-hospital-app-prod -> app-hospital-prod).
 3. After publish, verify app starts correctly (check Log stream) - watch for Blob/DB

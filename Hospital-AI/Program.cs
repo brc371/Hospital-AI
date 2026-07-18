@@ -1,24 +1,25 @@
 using Azure;
 using Azure.AI.Inference;
 using Azure.AI.OpenAI;
-using Azure.Identity;
-using Azure.Storage.Blobs;
 using Hospital_AI.Data;
 using Hospital_AI.Settings;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
+using Microsoft.Identity.Web;
+using Microsoft.Identity.Web.UI;
 using Microsoft.OpenApi;
 using OpenAI.Chat;
 using System.Reflection;
 
 namespace Hospital_AI
 {
-    
+
     /// <summary>
-    /// Configures and starts the HW4 NoteKeeper ASP.NET Core Web API application,
-    /// registering all required services (AI, database, blob storage, queue, Swagger)
-    /// and running the HTTP request pipeline.
+    /// Configures and starts the AI Clinical Scribe ASP.NET Core Web API application,
+    /// registering all required services (AI, database, Swagger) and running the
+    /// HTTP request pipeline.
     /// </summary>
     public class Program
     {
@@ -36,6 +37,26 @@ namespace Hospital_AI
 
             // Add services to the container.
             builder.Services.AddControllers();
+
+            // Register Entra External ID (CIAM) authentication using the Microsoft identity
+            // platform. This configures cookie-based OpenID Connect sign-in: unauthenticated
+            // users are redirected to the tenant's hosted sign-up/sign-in user flow, and upon
+            // successful sign-in an encrypted auth cookie is issued containing the user's claims
+            // (name, email, etc.), which are then available via the Razor Pages 'User' property.
+            builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
+                .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"));
+
+            // Require authentication by default on every Razor Page/controller unless the
+            // page explicitly opts out with [AllowAnonymous] (e.g. the public welcome page).
+            builder.Services.AddAuthorization(options =>
+            {
+                options.FallbackPolicy = options.DefaultPolicy;
+            });
+
+            // Register Razor Pages (the provider/admin UI) alongside the existing API
+            // controllers, and wire up the prebuilt Microsoft.Identity.Web sign-in/out UI.
+            builder.Services.AddRazorPages()
+                .AddMicrosoftIdentityUI();
 
             // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
             builder.Services.AddOpenApi();
@@ -123,61 +144,7 @@ namespace Hospital_AI
                 }
             }
 
-            builder.Services.AddDbContext<MyDataBaseContext>(options => options.UseSqlServer(connectionString));
-
-            // Register BlobServiceClient for Azure Blob Storage using Managed Identity.
-            // BlobStorageSettings provides both the account URI and the Azure AD TenantId,
-            // matching the pattern from the lecture demo's StorageAccountSettings class.
-            BlobStorageSettings? blobStorageSettings = builder.Configuration
-                .GetSection(nameof(BlobStorageSettings))
-                .Get<BlobStorageSettings>();
-
-            if (blobStorageSettings == null
-                || string.IsNullOrWhiteSpace(blobStorageSettings.Uri)
-                || string.IsNullOrWhiteSpace(blobStorageSettings.TenantId))
-            {
-                logger.LogCritical("BlobStorageSettings is missing or incomplete. "
-                    + "Ensure Uri and TenantId are set in appsettings or App Service Application Settings.");
-                throw new InvalidOperationException(
-                    "BlobStorageSettings is not configured. Check the logs for details.");
-            }
-
-            // Configure DefaultAzureCredential to use only the credentials relevant for
-            // the current hosting environment, avoiding unnecessary probe delays.
-            var credentialOptions = new DefaultAzureCredentialOptions();
-            if (builder.Environment.IsDevelopment() ||
-                builder.Environment.EnvironmentName == "managedidentities")
-            {
-                // Local development: point all developer credentials at the correct tenant
-                // so VisualStudioCredential does not probe the wrong tenant (e.g. 'Microsoft Services').
-                // ManagedIdentity / WorkloadIdentity are excluded � not available on a dev machine.
-                credentialOptions.SharedTokenCacheTenantId               = blobStorageSettings.TenantId;
-                credentialOptions.VisualStudioCodeTenantId               = blobStorageSettings.TenantId;
-                credentialOptions.VisualStudioTenantId                   = blobStorageSettings.TenantId;
-                credentialOptions.ExcludeEnvironmentCredential           = true;
-                credentialOptions.ExcludeManagedIdentityCredential       = true;
-                credentialOptions.ExcludeWorkloadIdentityCredential      = true;
-                credentialOptions.ExcludeInteractiveBrowserCredential    = true;
-            }
-            else
-            {
-                // Azure hosted: use Managed Identity credential only, targeting the specific
-                // user-assigned identity (id_blobadmin) via BLOB_IDENTITY_CLIENT_ID.
-                // Developer tool credentials (CLI, VS, etc.) are not available in Azure
-                // and would cause unnecessary delays before reaching ManagedIdentityCredential.
-                credentialOptions.ExcludeVisualStudioCredential          = true;
-                credentialOptions.ExcludeVisualStudioCodeCredential      = true;
-                credentialOptions.ExcludeAzureCliCredential              = true;
-                credentialOptions.ExcludeAzurePowerShellCredential       = true;
-                credentialOptions.ExcludeAzureDeveloperCliCredential     = true;
-                credentialOptions.ExcludeWorkloadIdentityCredential      = true;
-                credentialOptions.ExcludeInteractiveBrowserCredential    = true;
-                credentialOptions.ManagedIdentityClientId                = builder.Configuration["BLOB_IDENTITY_CLIENT_ID"];
-            }
-
-            var blobCredential = new DefaultAzureCredential(credentialOptions);
-            builder.Services.AddSingleton(
-                new BlobServiceClient(new Uri(blobStorageSettings.Uri), blobCredential));
+            builder.Services.AddDbContext<ClinicalScribeDbContext>(options => options.UseSqlServer(connectionString));
 
             // This is the command to build the app
             // builder.<> methods. From this point on you work with "app" to configure stuff.
@@ -222,6 +189,11 @@ namespace Hospital_AI
             // HTTP requests to HTTPS so clients use a secure connection.
             app.UseHttpsRedirection();
 
+            // Adds authentication middleware to the request pipeline. Must run before
+            // UseAuthorization() so the ClaimsPrincipal is populated (from the auth cookie)
+            // before authorization checks evaluate [Authorize]/fallback policies.
+            app.UseAuthentication();
+
             // Adds authorization middleware to the request pipeline.
             // Keep app.UseAuthorization() before app.MapControllers() so authorization runs before
             // controller actions execute. What it does (clearly, step?by?step):
@@ -240,6 +212,10 @@ namespace Hospital_AI
             // and execute the code there. If the request is a GET() with an id, it will search for a GET() with an id arg within
             // NotesController.cs and execute the code there.
             app.MapControllers();
+
+            // Maps Razor Pages endpoints (the provider/admin workspace UI, including the
+            // Microsoft.Identity.Web sign-in/sign-out pages under /MicrosoftIdentity/Account/*).
+            app.MapRazorPages();
 
             app.Run();
         }
