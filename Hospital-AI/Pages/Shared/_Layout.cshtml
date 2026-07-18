@@ -11,6 +11,17 @@
         <nav class="navbar navbar-expand-sm navbar-light bg-white border-bottom mb-4">
             <div class="container">
                 <a class="navbar-brand" asp-page="/Index">Hospital AI Clinical Scribe</a>
+                @if (User.Identity?.IsAuthenticated == true)
+                {
+                    var navProvider = Context.Items["CurrentProvider"] as Hospital_AI.Models.Provider;
+                    <div class="navbar-nav me-auto">
+                        <a class="nav-link" asp-page="/Encounters/Index">Encounters</a>
+                        @if (navProvider?.Role == Hospital_AI.Models.ProviderRole.Admin)
+                        {
+                            <a class="nav-link" asp-page="/Admin/Index">Admin Dashboard</a>
+                        }
+                    </div>
+                }
                 <div class="d-flex ms-auto align-items-center">
                     @if (User.Identity?.IsAuthenticated == true)
                     {

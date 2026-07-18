@@ -48,6 +48,7 @@ else
             <button type="button" id="generateNoteBtn" class="btn btn-outline-primary">Generate note</button>
             <button type="submit" formaction="?handler=SaveNote" class="btn btn-success">Save note (finalize version)</button>
             <span id="generateStatus" class="text-muted ms-2"></span>
+            <span id="autosaveStatus" class="text-muted ms-2"></span>
         }
     </form>
 
@@ -92,12 +93,108 @@ else
     @if (!Model.IsReadOnly)
     {
         <script>
-            document.getElementById('generateNoteBtn').addEventListener('click', function () {
+            const transcriptTextarea = document.getElementById('transcriptText');
+            const draftTextarea = document.getElementById('draftNoteText');
+            const autosaveStatus = document.getElementById('autosaveStatus');
+
+            // Persists the current transcript/draft text to the server via the existing
+            // "SaveDraft" page handler, without a full page reload. Used both by the explicit
+            // autosave-on-typing flow (session persistence) and by "Generate note" (so
+            // generation always sees the latest transcript, even if the provider never clicked
+            // "Save draft" themselves).
+            async function saveDraftToServer() {
+                const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+                const formData = new URLSearchParams();
+                formData.append('__RequestVerificationToken', token);
+                formData.append('TranscriptText', transcriptTextarea.value);
+                formData.append('DraftNoteText', draftTextarea.value);
+
+                const response = await fetch(window.location.pathname + '?handler=SaveDraft', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formData.toString()
+                });
+
+                if (!response.ok) {
+                    throw new Error('Save draft failed with status ' + response.status);
+                }
+            }
+
+            // Debounced autosave: persists the transcript/draft to the database ~1.5s after
+            // the provider stops typing, so an in-progress draft survives a refresh, browser
+            // close, or login from a different device without requiring a manual "Save draft"
+            // click. Uses navigator.sendBeacon on page unload as a best-effort final flush.
+            let autosaveDebounceTimer = null;
+            let autosaveInFlight = false;
+            let autosaveDirty = false;
+
+            function scheduleAutosave() {
+                autosaveDirty = true;
+                autosaveStatus.textContent = 'Unsaved changes...';
+                clearTimeout(autosaveDebounceTimer);
+                autosaveDebounceTimer = setTimeout(runAutosave, 1500);
+            }
+
+            async function runAutosave() {
+                if (autosaveInFlight) {
+                    return;
+                }
+
+                autosaveInFlight = true;
+                autosaveDirty = false;
+
+                try {
+                    await saveDraftToServer();
+                    autosaveStatus.textContent = 'All changes saved.';
+                } catch {
+                    autosaveStatus.textContent = 'Autosave failed - click "Save draft" manually.';
+                } finally {
+                    autosaveInFlight = false;
+                    if (autosaveDirty) {
+                        scheduleAutosave();
+                    }
+                }
+            }
+
+            transcriptTextarea.addEventListener('input', scheduleAutosave);
+            draftTextarea.addEventListener('input', scheduleAutosave);
+
+            // Best-effort final save if the tab is closed/navigated away from while an
+            // autosave is still pending (debounce timer hasn't fired yet).
+            window.addEventListener('beforeunload', function () {
+                if (autosaveDirty) {
+                    const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+                    const formData = new URLSearchParams();
+                    formData.append('__RequestVerificationToken', token);
+                    formData.append('TranscriptText', transcriptTextarea.value);
+                    formData.append('DraftNoteText', draftTextarea.value);
+                    navigator.sendBeacon(
+                        window.location.pathname + '?handler=SaveDraft',
+                        new Blob([formData.toString()], { type: 'application/x-www-form-urlencoded' }));
+                }
+            });
+
+            document.getElementById('generateNoteBtn').addEventListener('click', async function () {
                 const button = this;
                 const status = document.getElementById('generateStatus');
-                const draftTextarea = document.getElementById('draftNoteText');
 
                 button.disabled = true;
+                status.textContent = 'Saving transcript...';
+
+                // Persist the current transcript/draft text first so "Generate note" works
+                // immediately after pasting a transcript, without requiring a separate
+                // "Save draft" click.
+                clearTimeout(autosaveDebounceTimer);
+                try {
+                    await saveDraftToServer();
+                    autosaveDirty = false;
+                    autosaveStatus.textContent = 'All changes saved.';
+                } catch {
+                    status.textContent = 'Failed to save transcript before generating.';
+                    button.disabled = false;
+                    return;
+                }
+
                 status.textContent = 'Generating...';
                 draftTextarea.value = '';
 
@@ -123,6 +220,50 @@ else
 
             // ICD-10 search widget: debounced free-text search against the local API, with
             // results inserted into the draft note's Assessment section on click.
+
+            // Inserts a code under an "ICD-10 Codes:" sub-header within the Assessment section
+            // (mirrors the section boundaries used server-side by SoapNoteParser), so saved
+            // NoteVersions persist the code as part of Assessment rather than trailing Plan text.
+            function insertIcd10CodeIntoAssessment(code, description) {
+                const text = draftTextarea.value;
+                const bulletLine = `- ${code} - ${description}`;
+                const sectionHeaderRegex = /^\s*(Subjective|Objective|Assessment|Plan)\s*:\s*/gim;
+
+                let assessmentStart = -1;
+                let assessmentContentStart = -1;
+                let nextSectionStart = text.length;
+                let match;
+
+                while ((match = sectionHeaderRegex.exec(text)) !== null) {
+                    if (assessmentStart === -1 && match[1].toLowerCase() === 'assessment') {
+                        assessmentStart = match.index;
+                        assessmentContentStart = match.index + match[0].length;
+                    } else if (assessmentStart !== -1) {
+                        nextSectionStart = match.index;
+                        break;
+                    }
+                }
+
+                if (assessmentStart === -1) {
+                    // No Assessment header yet - create one at the end of the note.
+                    const separator = (text.endsWith('\n') || text.length === 0) ? '' : '\n';
+                    draftTextarea.value = text + `${separator}\nAssessment:\nICD-10 Codes:\n${bulletLine}\n`;
+                } else {
+                    const assessmentContent = text.slice(assessmentContentStart, nextSectionStart);
+                    const hasHeader = assessmentContent.includes('ICD-10 Codes:');
+                    const trimmedContent = assessmentContent.replace(/\s+$/, '');
+                    const newContent = hasHeader
+                        ? `${trimmedContent}\n${bulletLine}\n`
+                        : `${trimmedContent}\nICD-10 Codes:\n${bulletLine}\n`;
+
+                    draftTextarea.value = text.slice(0, assessmentContentStart) + newContent + text.slice(nextSectionStart);
+                }
+
+                // Trigger the same debounced autosave used for manual typing, since this
+                // programmatic edit doesn't naturally fire an 'input' event.
+                scheduleAutosave();
+            }
+
             const icd10Input = document.getElementById('icd10SearchInput');
             const icd10Results = document.getElementById('icd10Results');
             let icd10DebounceTimer = null;
@@ -147,8 +288,7 @@ else
                         li.style.cursor = 'pointer';
                         li.textContent = `${item.code} - ${item.description}`;
                         li.addEventListener('click', () => {
-                            const draftTextarea = document.getElementById('draftNoteText');
-                            draftTextarea.value += (draftTextarea.value.endsWith('\n') || draftTextarea.value.length === 0 ? '' : '\n') + `${item.code} - ${item.description}`;
+                            insertIcd10CodeIntoAssessment(item.code, item.description);
                         });
                         icd10Results.appendChild(li);
                     });

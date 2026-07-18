@@ -1,0 +1,70 @@
+@page
+@model Hospital_AI.Pages.Admin.ProvidersModel
+@{
+    ViewData["Title"] = "Provider Roster";
+}
+
+<h1 class="display-6">Admin Dashboard</h1>
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item"><a class="nav-link" asp-page="/Admin/Index">All Encounters</a></li>
+    <li class="nav-item"><a class="nav-link active" asp-page="/Admin/Providers">Providers</a></li>
+    <li class="nav-item"><a class="nav-link" asp-page="/Admin/Templates">Note Templates</a></li>
+</ul>
+
+@if (Model.AddError is not null)
+{
+    <div class="alert alert-warning">@Model.AddError</div>
+}
+
+<table class="table table-sm">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var provider in Model.Providers)
+        {
+            <tr>
+                <td>@provider.Name</td>
+                <td>@provider.Email</td>
+                <td>@provider.Role</td>
+                <td>@(provider.IsActive ? "Active" : "Deactivated")</td>
+                <td>
+                    <form method="post" asp-page-handler="ToggleActive" asp-route-id="@provider.Id" asp-route-isActive="@(!provider.IsActive)" class="d-inline">
+                        <button type="submit" class="btn btn-sm @(provider.IsActive ? "btn-outline-danger" : "btn-outline-success")">
+                            @(provider.IsActive ? "Deactivate" : "Reactivate")
+                        </button>
+                    </form>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<h5 class="mt-4">Add provider</h5>
+<form method="post" asp-page-handler="Add" class="row g-2 align-items-end">
+    <div class="col-auto">
+        <label asp-for="NewName" class="form-label">Name</label>
+        <input asp-for="NewName" class="form-control" />
+    </div>
+    <div class="col-auto">
+        <label asp-for="NewEmail" class="form-label">Email</label>
+        <input asp-for="NewEmail" class="form-control" />
+    </div>
+    <div class="col-auto">
+        <label asp-for="NewRole" class="form-label">Role</label>
+        <select asp-for="NewRole" class="form-select">
+            <option value="Provider">Provider</option>
+            <option value="Admin">Admin</option>
+        </select>
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-primary">Add provider</button>
+    </div>
+</form>

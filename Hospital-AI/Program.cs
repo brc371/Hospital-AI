@@ -164,6 +164,11 @@ namespace Hospital_AI
             // Register the ICD-10 search service used by the code search widget.
             builder.Services.AddScoped<IIcd10SearchService, Icd10SearchService>();
 
+            // Register the Admin dashboard services: template CRUD and provider roster
+            // management.
+            builder.Services.AddScoped<ITemplateService, TemplateService>();
+            builder.Services.AddScoped<IProviderManagementService, ProviderManagementService>();
+
             // This is the command to build the app
             // builder.<> methods. From this point on you work with "app" to configure stuff.
             var app = builder.Build();

@@ -33,6 +33,7 @@ namespace Hospital_AI.Services
         {
             var encounter = await _dbContext.Encounters
                 .Include(e => e.Patient)
+                .Include(e => e.NoteTemplate)
                 .FirstOrDefaultAsync(e => e.Id == encounterId, cancellationToken);
 
             if (encounter is null || encounter.Patient is null)
@@ -80,6 +81,15 @@ namespace Hospital_AI.Services
                 "this is a returning patient and prior context would improve the note. Write in " +
                 "clear, professional clinical language. Format the output with 'Subjective:', " +
                 "'Objective:', 'Assessment:', and 'Plan:' section headers.";
+
+            // If the encounter has an active note template selected, append its admin-authored
+            // instructions to the system prompt. The template is re-read from the database on
+            // every generation call (no caching), so admin edits take effect on the very next
+            // generation without requiring the provider to refresh the page.
+            if (encounter.NoteTemplate is { IsActive: true } template)
+            {
+                systemPrompt += $"\n\nAdditional instructions for this encounter type ('{template.Name}'):\n{template.PromptText}";
+            }
 
             var patientContext =
                 $"Patient: {encounter.Patient.FirstName} {encounter.Patient.LastName}, " +

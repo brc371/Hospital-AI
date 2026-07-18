@@ -23,7 +23,7 @@ namespace Hospital_AI.Services
         }
 
         /// <inheritdoc />
-        public async Task<Encounter> StartEncounterAsync(Guid providerId, string firstName, string lastName, DateOnly dateOfBirth)
+        public async Task<Encounter> StartEncounterAsync(Guid providerId, string firstName, string lastName, DateOnly dateOfBirth, Guid? noteTemplateId = null)
         {
             var patient = await _patientMatchingService.FindOrCreateAsync(firstName, lastName, dateOfBirth);
 
@@ -32,6 +32,7 @@ namespace Hospital_AI.Services
                 Id = Guid.NewGuid(),
                 PatientId = patient.Id,
                 ProviderId = providerId,
+                NoteTemplateId = noteTemplateId,
                 TranscriptText = string.Empty,
                 Status = EncounterStatus.Draft
             };

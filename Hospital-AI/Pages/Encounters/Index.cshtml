@@ -26,6 +26,16 @@
                     <label asp-for="DateOfBirth" class="form-label">Date of birth</label>
                     <input asp-for="DateOfBirth" type="date" class="form-control" />
                 </div>
+                <div class="col-md-3">
+                    <label asp-for="NoteTemplateId" class="form-label">Note template</label>
+                    <select asp-for="NoteTemplateId" class="form-select">
+                        <option value="">Default (no template)</option>
+                        @foreach (var template in Model.AvailableTemplates)
+                        {
+                            <option value="@template.Id">@template.Name</option>
+                        }
+                    </select>
+                </div>
                 <div class="col-md-1 d-flex align-items-end">
                     <button type="submit" class="btn btn-primary w-100">Start</button>
                 </div>

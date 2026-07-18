@@ -14,13 +14,22 @@ namespace Hospital_AI.Pages.Encounters
     {
         private readonly IRoleResolutionService _roleResolutionService;
         private readonly IEncounterService _encounterService;
+        private readonly ITemplateService _templateService;
 
         /// <summary>Initializes a new instance of <see cref="IndexModel"/>.</summary>
-        public IndexModel(IRoleResolutionService roleResolutionService, IEncounterService encounterService)
+        public IndexModel(IRoleResolutionService roleResolutionService, IEncounterService encounterService, ITemplateService templateService)
         {
             _roleResolutionService = roleResolutionService;
             _encounterService = encounterService;
+            _templateService = templateService;
         }
+
+        /// <summary>The active note templates providers can choose from before starting an encounter.</summary>
+        public List<NoteTemplate> AvailableTemplates { get; private set; } = [];
+
+        /// <summary>The note template selected on the "start encounter" form, if any.</summary>
+        [BindProperty]
+        public Guid? NoteTemplateId { get; set; }
 
         /// <summary>The encounters to display: all encounters if Admin, otherwise only the signed-in provider's own.</summary>
         public List<Encounter> Encounters { get; private set; } = [];
@@ -54,6 +63,11 @@ namespace Hospital_AI.Pages.Encounters
                 ? await _encounterService.GetAllEncountersAsync()
                 : await _encounterService.GetEncountersForProviderAsync(provider.Id);
 
+            if (!IsAdmin)
+            {
+                AvailableTemplates = await _templateService.GetActiveAsync();
+            }
+
             return Page();
         }
 
@@ -73,10 +87,11 @@ namespace Hospital_AI.Pages.Encounters
             {
                 ModelState.AddModelError(string.Empty, "First name, last name, and date of birth are all required.");
                 Encounters = await _encounterService.GetEncountersForProviderAsync(provider.Id);
+                AvailableTemplates = await _templateService.GetActiveAsync();
                 return Page();
             }
 
-            var encounter = await _encounterService.StartEncounterAsync(provider.Id, FirstName, LastName, DateOfBirth.Value);
+            var encounter = await _encounterService.StartEncounterAsync(provider.Id, FirstName, LastName, DateOfBirth.Value, NoteTemplateId);
 
             return RedirectToPage("./Workspace", new { id = encounter.Id });
         }

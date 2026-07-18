@@ -1,4 +1,52 @@
+## STEP 10 COMPLETE: Admin dashboard (provider roster, note templates, all-encounters view)
+
+- `Services/ITemplateService.cs` / `TemplateService.cs` - CRUD for `NoteTemplate` rows
+  (`GetAllAsync`, `GetActiveAsync` for the provider-facing picker, `GetByIdAsync`,
+  `CreateAsync`, `UpdateAsync`, `DeleteAsync`). `UpdateAsync` always stamps
+  `UpdatedAtUtc`, but the real "live update" behavior comes from `NoteGenerationService`
+  re-reading the template fresh from the database on every generation call (no in-memory
+  caching anywhere) - so an admin's edit takes effect on the very next "Generate note" click
+  a provider makes, with no polling or page refresh required.
+- `Services/IProviderManagementService.cs` / `ProviderManagementService.cs` - roster
+  management: `GetAllAsync`, `AddAsync(name, email, role)`, `SetActiveAsync(id, isActive)`.
+  Deactivating a provider only flips `IsActive`; it never deletes the account or its historical
+  encounters/note versions, since `RoleResolutionService.ResolveByEmailAsync` already treats
+  inactive providers as unauthenticated (existing Step 5 behavior) - Step 10 just adds the
+  admin UI on top of that existing enforcement.
+- `Pages/Admin/Index.cshtml(.cs)` - all-encounters view across every provider, filterable by
+  provider (dropdown) and date range (`FromDate`/`ToDate`, matched against `CreatedAtUtc`).
+  Reuses the existing `IEncounterService.GetAllEncountersAsync()` from Step 6 and filters
+  in-memory (dataset is small/demo-scale; a real production system would push filters into
+  the EF query, called out as a known simplification).
+- `Pages/Admin/Providers.cshtml(.cs)` - lists all providers/admins, an "Add provider" form
+  (validates required fields + duplicate email before insert), and a per-row
+  Deactivate/Reactivate toggle button.
+- `Pages/Admin/Templates.cshtml(.cs)` - lists all templates, an inline create/edit form (edit
+  mode driven by an `?editId=` query param), and a Delete button per row (with a client-side
+  confirm). Deleting a template sets `Encounter.NoteTemplateId` to `null` via the existing
+  `SetNull` delete behavior configured in `ClinicalScribeDbContext`, so past encounters keep
+  their history.
+- All three Admin pages independently re-check `Role == ProviderRole.Admin` via
+  `IRoleResolutionService` and redirect to `/AccessDenied` otherwise - consistent with the
+  existing manual role-check pattern used by `Encounters/Index` and `Workspace` rather than
+  introducing a new ASP.NET Core authorization policy.
+- `Pages/Encounters/Index.cshtml(.cs)` - providers now pick an (optional) active `NoteTemplate`
+  from a dropdown on the "Start a new encounter" form; the selection is passed to
+  `IEncounterService.StartEncounterAsync(..., noteTemplateId)` and persisted directly on the
+  new `Encounter.NoteTemplateId` column (already present in the schema since Step 6/`Encounter`
+  model - no new migration was required).
+- `Services/NoteGenerationService.cs` - `GenerateNoteStreamAsync` now includes
+  `encounter.NoteTemplate` in its query and, if an active template is set, appends its
+  `PromptText` to the system prompt as "Additional instructions for this encounter type" -
+  this is what makes the AI visibly behave differently per template as required.
+- `Pages/Shared/_Layout.cshtml` - added top nav links ("Encounters", and "Admin Dashboard" only
+  for signed-in Admins) using the existing `Context.Items["CurrentProvider"]` middleware value.
+- `Program.cs` - registered `ITemplateService`/`TemplateService` and
+  `IProviderManagementService`/`ProviderManagementService` in DI (scoped, matching the other
+  DbContext-dependent services).
+
 ## STEP 9 COMPLETE: ICD-10 code search widget
+
 
 - `Data/Icd10CodeSeedData.cs` - ~220 real, curated ICD-10-CM codes spanning major categories
   (cardiovascular, endocrine, respiratory, musculoskeletal, mental health, infectious disease,

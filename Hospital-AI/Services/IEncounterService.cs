@@ -17,7 +17,8 @@ namespace Hospital_AI.Services
         /// <param name="firstName">The patient's first name.</param>
         /// <param name="lastName">The patient's last name.</param>
         /// <param name="dateOfBirth">The patient's date of birth.</param>
-        Task<Encounter> StartEncounterAsync(Guid providerId, string firstName, string lastName, DateOnly dateOfBirth);
+        /// <param name="noteTemplateId">The note template to use for this encounter's generations, if any.</param>
+        Task<Encounter> StartEncounterAsync(Guid providerId, string firstName, string lastName, DateOnly dateOfBirth, Guid? noteTemplateId = null);
 
         /// <summary>
         /// Saves the in-progress transcript and/or draft note text for an encounter, without
