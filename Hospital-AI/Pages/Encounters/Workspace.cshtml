@@ -13,6 +13,12 @@ else
     <h1 class="display-6">Encounter: @Model.Encounter.Patient?.FirstName @Model.Encounter.Patient?.LastName</h1>
     <p class="text-muted">DOB: @Model.Encounter.Patient?.DateOfBirth &middot; Status: @Model.Encounter.Status</p>
 
+    <div id="deactivatedBanner" class="alert alert-danger" style="display:none;">
+        Your account has been deactivated by an administrator. Your work up to the last
+        successful save is preserved, but no further changes can be saved. Please contact
+        an administrator if you believe this is an error.
+    </div>
+
     @if (Model.IsReadOnly)
     {
         <div class="alert alert-info">You are viewing this encounter as an Admin. Only the owning provider can edit it.</div>
@@ -96,6 +102,14 @@ else
             const transcriptTextarea = document.getElementById('transcriptText');
             const draftTextarea = document.getElementById('draftNoteText');
             const autosaveStatus = document.getElementById('autosaveStatus');
+            const deactivatedBanner = document.getElementById('deactivatedBanner');
+            let accountDeactivated = false;
+
+            // Thrown by saveDraftToServer() specifically when the server reports the signed-in
+            // provider's account has been deactivated (HTTP 401), so callers can distinguish
+            // this from a transient network/save failure and react appropriately (stop
+            // retrying, show a clear message, disable further actions).
+            class DeactivatedAccountError extends Error {}
 
             // Persists the current transcript/draft text to the server via the existing
             // "SaveDraft" page handler, without a full page reload. Used both by the explicit
@@ -111,12 +125,44 @@ else
 
                 const response = await fetch(window.location.pathname + '?handler=SaveDraft', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
                     body: formData.toString()
                 });
 
+                if (response.status === 401) {
+                    throw new DeactivatedAccountError('Account deactivated.');
+                }
+
                 if (!response.ok) {
                     throw new Error('Save draft failed with status ' + response.status);
+                }
+            }
+
+            // Non-happy-path: an admin can deactivate a provider's account while that provider
+            // has an encounter workspace open with unsaved changes. Rather than the next
+            // autosave/generate call silently failing (or the page abruptly redirecting to
+            // /AccessDenied mid-edit, discarding whatever wasn't yet saved), we surface a clear,
+            // persistent banner and stop all further save attempts/actions - the provider's
+            // last successfully saved state remains intact in the database, but nothing typed
+            // after deactivation is lost silently or resubmitted in a loop.
+            function handleAccountDeactivated() {
+                if (accountDeactivated) {
+                    return;
+                }
+
+                accountDeactivated = true;
+                clearTimeout(autosaveDebounceTimer);
+                deactivatedBanner.style.display = '';
+                autosaveStatus.textContent = '';
+                transcriptTextarea.disabled = true;
+                draftTextarea.disabled = true;
+
+                const generateBtn = document.getElementById('generateNoteBtn');
+                if (generateBtn) {
+                    generateBtn.disabled = true;
                 }
             }
 
@@ -136,7 +182,7 @@ else
             }
 
             async function runAutosave() {
-                if (autosaveInFlight) {
+                if (autosaveInFlight || accountDeactivated) {
                     return;
                 }
 
@@ -146,11 +192,15 @@ else
                 try {
                     await saveDraftToServer();
                     autosaveStatus.textContent = 'All changes saved.';
-                } catch {
+                } catch (error) {
+                    if (error instanceof DeactivatedAccountError) {
+                        handleAccountDeactivated();
+                        return;
+                    }
                     autosaveStatus.textContent = 'Autosave failed - click "Save draft" manually.';
                 } finally {
                     autosaveInFlight = false;
-                    if (autosaveDirty) {
+                    if (autosaveDirty && !accountDeactivated) {
                         scheduleAutosave();
                     }
                 }
@@ -189,7 +239,13 @@ else
                     await saveDraftToServer();
                     autosaveDirty = false;
                     autosaveStatus.textContent = 'All changes saved.';
-                } catch {
+                } catch (error) {
+                    if (error instanceof DeactivatedAccountError) {
+                        handleAccountDeactivated();
+                        button.disabled = true;
+                        status.textContent = '';
+                        return;
+                    }
                     status.textContent = 'Failed to save transcript before generating.';
                     button.disabled = false;
                     return;
@@ -209,6 +265,7 @@ else
                     eventSource.close();
                     button.disabled = false;
                     status.textContent = 'Generation complete. Review and save the draft.';
+                    scheduleAutosave();
                 });
 
                 eventSource.onerror = function () {
@@ -227,7 +284,7 @@ else
             function insertIcd10CodeIntoAssessment(code, description) {
                 const text = draftTextarea.value;
                 const bulletLine = `- ${code} - ${description}`;
-                const sectionHeaderRegex = /^\s*(Subjective|Objective|Assessment|Plan)\s*:\s*/gim;
+                const sectionHeaderRegex = /^\s*\**\s*(Subjective|Objective|Assessment|Plan)\s*\**\s*:\s*\**\s*/gim;
 
                 let assessmentStart = -1;
                 let assessmentContentStart = -1;

@@ -80,7 +80,11 @@ namespace Hospital_AI.Services
                 "observations below. Use the get_patient_history tool if the transcript suggests " +
                 "this is a returning patient and prior context would improve the note. Write in " +
                 "clear, professional clinical language. Format the output with 'Subjective:', " +
-                "'Objective:', 'Assessment:', and 'Plan:' section headers.";
+                "'Objective:', 'Assessment:', and 'Plan:' section headers, each on its own line " +
+                "at the start of the line. Output plain text only - do not use Markdown " +
+                "formatting of any kind (no '**' bold, no '#' headings, no bullet characters " +
+                "like '*' or '-' for lists; use plain hyphen-prefixed lines like '- item' only " +
+                "if a list is needed within a section).";
 
             // If the encounter has an active note template selected, append its admin-authored
             // instructions to the system prompt. The template is re-read from the database on

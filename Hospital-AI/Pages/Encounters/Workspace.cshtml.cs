@@ -78,11 +78,26 @@ namespace Hospital_AI.Pages.Encounters
         /// note text without creating a finalized note version. Only the owning provider may
         /// save; Admins viewing another provider's encounter cannot.
         /// </summary>
+        /// <remarks>
+        /// Non-happy-path: if the signed-in user's account has been deactivated by an admin
+        /// since the page was loaded (e.g. mid-draft), <see cref="ResolveCurrentProviderAsync"/>
+        /// returns <c>null</c> just like an unknown user. A normal browser form submission is
+        /// redirected to <c>/AccessDenied</c> as usual, but the client-side autosave script
+        /// calls this handler via <c>fetch</c> with an <c>X-Requested-With</c> header; for that
+        /// case a 401 response is returned instead so the JS can distinguish "not saved because
+        /// deactivated" from "saved successfully" and show a clear, non-silent banner rather
+        /// than reporting a false "All changes saved."
+        /// </remarks>
         public async Task<IActionResult> OnPostSaveDraftAsync(Guid id)
         {
             var provider = await ResolveCurrentProviderAsync();
             if (provider is null)
             {
+                if (IsAjaxRequest())
+                {
+                    return StatusCode(StatusCodes.Status401Unauthorized);
+                }
+
                 return RedirectToPage("/AccessDenied");
             }
 
@@ -143,5 +158,12 @@ namespace Hospital_AI.Pages.Encounters
             var email = User.Identity?.Name;
             return email is null ? null : await _roleResolutionService.ResolveByEmailAsync(email);
         }
+
+        /// <summary>
+        /// Determines whether the current request was made via the client-side autosave/
+        /// generate-note <c>fetch</c> calls (which set a custom header) rather than a normal
+        /// browser form submission, so failure responses can be tailored appropriately for each.
+        /// </summary>
+        private bool IsAjaxRequest() => Request.Headers.XRequestedWith == "XMLHttpRequest";
     }
 }

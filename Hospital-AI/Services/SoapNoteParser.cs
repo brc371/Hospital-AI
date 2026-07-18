@@ -10,7 +10,7 @@ namespace Hospital_AI.Services
     /// </summary>
     public static partial class SoapNoteParser
     {
-        [GeneratedRegex(@"^\s*(Subjective|Objective|Assessment|Plan)\s*:\s*", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
+        [GeneratedRegex(@"^\s*\**\s*(Subjective|Objective|Assessment|Plan)\s*\**\s*:\s*\**\s*", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
         private static partial Regex SectionHeaderRegex();
 
         /// <summary>

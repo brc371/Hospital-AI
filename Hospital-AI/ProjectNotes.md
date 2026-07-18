@@ -1,4 +1,81 @@
+## STEP 12 COMPLETE: Non-happy-path scenarios (2 of 2)
+
+Two substantive non-happy-path scenarios are implemented and demonstrable:
+
+**Scenario 1 - Transcript with no clinically meaningful content** (built during Step 7/9):
+`NoteGenerationService`'s system prompt asks the AI to generate a SOAP note from the given
+transcript; when the transcript is empty or contains nothing clinically relevant, the model
+responds with an honest "insufficient information to determine a diagnosis" note (verified
+with an empty-transcript test) rather than hallucinating vitals, exam findings, or a fake
+diagnosis. No special-case code was needed for this - it emerges from clearly telling the
+model to only report what's actually present in the transcript.
+
+**Scenario 2 - Admin deactivates a provider while they have a draft open**:
+- `RoleResolutionService.ResolveByEmailAsync` (existing, Step 5) already treats a deactivated
+  provider the same as an unrecognized user - it returns `null`, and every page handler
+  (`Workspace`, `Encounters/Index`, etc.) redirects unrecognized users to `/AccessDenied`.
+  That was sufficient for full page loads/navigations, but not for the client-side autosave
+  `fetch` calls introduced in Step 11: `fetch` silently follows a redirect to the HTML
+  `/AccessDenied` page (status 200), so the autosave script would have reported a false
+  "All changes saved" even though nothing was actually persisted after deactivation.
+- `Pages/Encounters/Workspace.cshtml.cs` - `OnPostSaveDraftAsync` now checks
+  `IsAjaxRequest()` (a request carrying the `X-Requested-With: XMLHttpRequest` header) and
+  returns a plain `401 Unauthorized` status instead of a redirect for that case, while normal
+  browser form submissions (the "Save draft"/"Save note" buttons) are unaffected and still
+  redirect to `/AccessDenied` as before.
+- `Pages/Encounters/Workspace.cshtml` - the JS `saveDraftToServer()` helper now sends that
+  header and throws a distinct `DeactivatedAccountError` when it sees a 401 response. Both the
+  debounced autosave loop and the "Generate note" pre-save call catch this specific error type
+  and call a new `handleAccountDeactivated()` function, which:
+  - Shows a persistent, clearly worded `#deactivatedBanner` alert explaining the account was
+	deactivated and that work up to the last successful save is preserved.
+  - Disables both textareas and the "Generate note" button so no further edits/API calls are
+	attempted.
+  - Permanently stops the autosave retry loop (rather than silently retrying forever or
+	thrashing the server with failing requests).
+- `Controllers/NoteGenerationController.cs` - the SSE `generate-note` endpoint already returned
+  `403 Forbidden` for a deactivated provider (pre-existing check); confirmed this remains
+  correct and is the first line of defense if a deactivation happens between page load and
+  clicking "Generate note" (the pre-generation save call now also independently detects and
+  surfaces deactivation before the EventSource connection is even opened).
+- Defines the reasonable behavior chosen for this scenario: **preserve, don't discard** - the
+  provider's last successfully saved draft/note-versions remain fully intact in the database
+  (nothing is deleted or rolled back on deactivation), but no further writes are accepted once
+  deactivated, and the UI makes this state unambiguous rather than failing silently or
+  crashing.
+
+## STEP 11 COMPLETE: Session persistence / draft autosave across devices
+
+
+- `Pages/Encounters/Workspace.cshtml` - the transcript and draft note textareas already
+  persisted to the database via the existing `SaveDraft` handler (from Step 6), but previously
+  only when the provider explicitly clicked "Save draft". Step 11 adds true autosave:
+  - A debounced (1.5s after the last keystroke) `input` listener on both textareas calls a new
+	shared `saveDraftToServer()` function, which POSTs to the existing `?handler=SaveDraft`
+	page handler via `fetch` (no full page reload/navigation), reusing the anti-forgery token
+	already rendered in the form.
+  - A small `#autosaveStatus` indicator next to the action buttons shows "Unsaved changes...",
+	"All changes saved.", or an error message, giving the provider visible confidence that
+	their work is being persisted continuously (this is what makes "restore from the database
+	after a refresh/browser close/different-device login" actually reliable, since the DB is
+	now updated seconds after typing rather than only on an explicit save).
+  - `insertIcd10CodeIntoAssessment` (Step 9) and the "Generate note" SSE completion handler
+	(Step 7) now also call the same autosave scheduling function, since those flows edit
+	`DraftNoteText` programmatically without firing a native `input` event.
+  - A `beforeunload` listener does a best-effort final save via `navigator.sendBeacon` if a
+	debounced autosave was still pending when the tab was closed/navigated away from, since a
+	normal `fetch` call is not guaranteed to complete once the page starts unloading.
+  - "Generate note" was already refactored (in a prior fix) to save the transcript via the same
+	handler before streaming starts, so generation always operates on the latest typed text
+	even if autosave hasn't fired yet.
+  - No new columns/migrations were needed - `Encounter.TranscriptText`/`DraftNoteText` and the
+	existing `OnGetAsync` reload were already sufficient to restore a draft on refresh or on a
+	different device/browser once autosave keeps the database current; this step's work was
+	entirely front-end (making the client aggressively persist rather than requiring a manual
+	save).
+
 ## STEP 10 COMPLETE: Admin dashboard (provider roster, note templates, all-encounters view)
+
 
 - `Services/ITemplateService.cs` / `TemplateService.cs` - CRUD for `NoteTemplate` rows
   (`GetAllAsync`, `GetActiveAsync` for the provider-facing picker, `GetByIdAsync`,

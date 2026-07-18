@@ -55,7 +55,11 @@ namespace Hospital_AI.Services
                 return null;
             }
 
-            encounter.TranscriptText = transcriptText;
+            // Razor Pages model binding converts a submitted empty string to null by default
+            // (legacy ConvertEmptyStringToNull behavior), which would otherwise violate the
+            // NOT NULL constraint on Encounters.TranscriptText when a provider clears the
+            // transcript box entirely (e.g. to start typing a new observation).
+            encounter.TranscriptText = transcriptText ?? string.Empty;
             encounter.DraftNoteText = draftNoteText;
             encounter.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
