@@ -109,7 +109,9 @@ namespace Hospital_AI.Services
             var encounter = await _dbContext.Encounters
                 .FirstOrDefaultAsync(e => e.Id == encounterId && e.ProviderId == providerId);
 
-            if (encounter is null || string.IsNullOrWhiteSpace(encounter.DraftNoteText))
+            if (encounter is null
+                || string.IsNullOrWhiteSpace(encounter.TranscriptText)
+                || string.IsNullOrWhiteSpace(encounter.DraftNoteText))
             {
                 return null;
             }

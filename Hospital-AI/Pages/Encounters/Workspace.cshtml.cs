@@ -139,7 +139,7 @@ namespace Hospital_AI.Pages.Encounters
 
             if (noteVersion is null)
             {
-                SaveNoteError = "Cannot save a note version: the draft SOAP note is empty. Generate or write a note first.";
+                SaveNoteError = "Cannot save a note version: the transcript and/or draft SOAP note is empty. Enter a transcript and generate or write a note first.";
                 Encounter = updatedEncounter;
             }
             else
