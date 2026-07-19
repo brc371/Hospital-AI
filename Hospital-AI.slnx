@@ -9,5 +9,4 @@
     <File Path="bicep/modules/upgrade-appservice-plan.bicep" />
   </Folder>
   <Project Path="Hospital-AI/Hospital-AI.csproj" />
-  <Project Path="Hospital-AIChat/Hospital-AIChat.csproj" />
 </Solution>
