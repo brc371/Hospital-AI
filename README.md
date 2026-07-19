@@ -9,7 +9,7 @@ the organization.
 > application backed by Azure OpenAI, Entity Framework Core, and Entra External ID (CIAM)
 > authentication.
 
-![Hospital-AI screenshot](./image.png)
+[![Hospital-AI screenshot](./image.png)](https://app-hospital-prod-axarfzabe9b5a7av.westcentralus-01.azurewebsites.net/)
 
 ## Table of Contents
 
